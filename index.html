@@ -462,17 +462,13 @@ function fmtTS(iso){
 
 function renderHist(){
   var list=document.getElementById('hlist');
-  var emp=document.getElementById('hemp');
   document.getElementById('hcnt').textContent=
     hist.length+' registro'+(hist.length!==1?'s':'');
+  list.innerHTML='';
   if(!hist.length){
-    list.innerHTML='';
-    list.appendChild(emp);
-    emp.style.display='block';
+    list.innerHTML='<div class="hempty">Sin detecciones guardadas</div>';
     return;
   }
-  emp.style.display='none';
-  list.innerHTML='';
   for(var i=hist.length-1;i>=0;i--){
     var r=hist[i];
     var div=document.createElement('div');
