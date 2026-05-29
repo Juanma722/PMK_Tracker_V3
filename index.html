@@ -1,4 +1,4 @@
-<!-- PMK_Tracker_V3 index.html v5 -->
+<!-- PMK_Tracker_V3 index.html v6 -->
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -103,13 +103,13 @@ html,body{height:100%;width:100%;max-width:100vw;background:var(--bg);color:var(
 <div class="app">
 
 <header class="hdr">
-  <div class="logo">PigTracker <span>// V2</span></div>
+  <div class="logo">PigTracker <span>by PetroMark</span></div>
   <div id="clock">--:--:--</div>
 </header>
 
 <div class="blebar">
   <div class="dot" id="dot"></div>
-  <div class="bstat" id="bstat">DEMO — conectá el PigTracker por BLE</div>
+  <div class="bstat" id="bstat">Conectá el PigTracker por BLE</div>
   <button class="btn" id="dlbtn" onclick="dlHist()" disabled>↓ HIST</button>
   <button class="btn red" onclick="document.getElementById('modal').classList.add('show')">✕</button>
   <button class="btn" id="blebtn" onclick="toggleBLE()">CONECTAR</button>
@@ -197,7 +197,7 @@ html,body{height:100%;width:100%;max-width:100vw;background:var(--bg);color:var(
 
 <script>
 'use strict';
-console.log('PMK_Tracker_V3 v5 cargado OK');
+console.log('PMK_Tracker_V3 v6 cargado OK');
 const SVC  = '12345678-1234-1234-1234-123456789abc';
 const CFFT = 'abcd1234-ab12-cd34-ef56-abcdef123456';
 const CHST = 'abcd1234-ab12-cd34-ef56-abcdef123457';
@@ -463,7 +463,7 @@ function onDisc(){
   document.getElementById('blebtn').textContent='RECONECTAR';
   document.getElementById('blebtn').className='btn';
   document.getElementById('dlbtn').disabled=true;
-  setS('Desconectado — modo demo');
+  setS('Desconectado');
 }
 function disconn(){if(dev&&dev.gatt&&dev.gatt.connected)dev.gatt.disconnect();onDisc();}
 function setS(m){document.getElementById('bstat').textContent=m;}
