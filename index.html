@@ -1,4 +1,4 @@
-<!-- PMK_Tracker_V3 index.html v2 -->
+<!-- PMK_Tracker_V3 index.html v3 -->
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -184,7 +184,7 @@ html,body{height:100%;width:100%;max-width:100vw;background:var(--bg);color:var(
 
 <script>
 'use strict';
-console.log('PMK_Tracker_V3 v2 cargado OK');
+console.log('PMK_Tracker_V3 v3 cargado OK');
 const SVC  = '12345678-1234-1234-1234-123456789abc';
 const CFFT = 'abcd1234-ab12-cd34-ef56-abcdef123456';
 const CHST = 'abcd1234-ab12-cd34-ef56-abcdef123457';
@@ -394,6 +394,7 @@ function onFFT(e){
 async function dlHist(){
   if(!cHist||!conn)return;
   hist=[];si=-1;dlt=0;
+  _histIdxVisto={};
   dbClear();
   renderHist();
   document.getElementById('prog').classList.add('on');
@@ -403,12 +404,19 @@ async function dlHist(){
   await cHist.writeValue(new Uint8Array([0xA0]));
 }
 
+var _histIdxVisto={};
 function onHistData(e){
   var dv=e.target.value;
   var cmd=dv.getUint8(0);
   if(cmd===0xA1){
     dlt=(dv.getUint8(1)<<8)|dv.getUint8(2);
     var idx=(dv.getUint8(3)<<8)|dv.getUint8(4);
+    // Ignorar si ya procesamos este índice
+    if(_histIdxVisto[idx]){
+      console.log('Duplicado ignorado idx='+idx);
+      return;
+    }
+    _histIdxVisto[idx]=true;
     try{
       var bytes=new Uint8Array(dv.buffer,dv.byteOffset+5,dv.byteLength-5);
       var str=new TextDecoder().decode(bytes).trim();
