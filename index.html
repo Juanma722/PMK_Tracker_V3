@@ -1,4 +1,4 @@
-<!-- PMK_Tracker_V3 index.html v7 -->
+<!-- PMK_Tracker_V3 index.html v8 -->
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -197,7 +197,7 @@ html,body{height:100%;width:100%;max-width:100vw;background:var(--bg);color:var(
 
 <script>
 'use strict';
-console.log('PMK_Tracker_V3 v7 cargado OK');
+console.log('PMK_Tracker_V3 v8 cargado OK');
 const SVC  = '12345678-1234-1234-1234-123456789abc';
 const CFFT = 'abcd1234-ab12-cd34-ef56-abcdef123456';
 const CHST = 'abcd1234-ab12-cd34-ef56-abcdef123457';
@@ -557,6 +557,7 @@ function selDet(i){
 // ── Configuración LoRa ──
 var _loraNodeId = 0;
 var _loraIsGw = false;
+var _fftActivo = true;
 
 function abrirConfigLora(){
   document.getElementById('modalLora').classList.add('show');
@@ -571,6 +572,20 @@ function cerrarConfigLora(){
 function cambiarNodeId(delta){
   _loraNodeId=Math.max(0,Math.min(253,_loraNodeId+delta));
   document.getElementById('nodeIdVal').textContent=_loraNodeId;
+}
+function setFft(val){
+  _fftActivo=val;
+  document.getElementById('btnFftOn').style.borderColor=val?'var(--success)':'var(--border2)';
+  document.getElementById('btnFftOn').style.color=val?'var(--success)':'var(--muted)';
+  document.getElementById('btnFftOn').style.background=val?'rgba(0,95,69,0.15)':'transparent';
+  document.getElementById('btnFftOff').style.borderColor=!val?'var(--danger)':'var(--border2)';
+  document.getElementById('btnFftOff').style.color=!val?'var(--danger)':'var(--muted)';
+  document.getElementById('btnFftOff').style.background=!val?'rgba(176,48,0,0.15)':'transparent';
+  // Enviar inmediatamente si BLE conectado
+  if(cLCFG&&conn){
+    cLCFG.writeValue(new Uint8Array([0xC3, val?1:0]));
+    setS('FFT ' + (val?'activado':'desactivado'));
+  }
 }
 function setGateway(val){
   _loraIsGw=val;
@@ -595,11 +610,14 @@ function onLoraCfgData(e){
   var isGw=dv.getUint8(2)===1;
   var nextHop=dv.getUint8(3);
   var backupHop=dv.getUint8(4);
+  var fftOn=dv.byteLength>6?dv.getUint8(6)===1:true;
   // Actualizar UI del modal
   _loraNodeId=nodeId;
   _loraIsGw=isGw;
+  _fftActivo=fftOn;
   document.getElementById('nodeIdVal').textContent=nodeId;
   setGateway(isGw);
+  setFft(fftOn);
   document.getElementById('loraStatus').textContent='Dispositivo conectado';
   document.getElementById('btnGuardarLora').disabled=false;
   var infoDiv=document.getElementById('loraInfoActual');
@@ -641,6 +659,13 @@ if('serviceWorker'in navigator){
         <div>BACKUP HOP: <span id="infoBackup" style="color:var(--accent)">—</span></div>
       </div>
     </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+        <span style="font-family:var(--mono);font-size:10px;color:var(--text)">FFT DETECTOR</span>
+        <div style="display:flex;gap:6px">
+          <button id="btnFftOff" onclick="setFft(false)" style="font-family:var(--mono);font-size:9px;padding:5px 12px;border-radius:4px;border:1px solid var(--border2);background:transparent;color:var(--muted);cursor:pointer">OFF</button>
+          <button id="btnFftOn"  onclick="setFft(true)"  style="font-family:var(--mono);font-size:9px;padding:5px 12px;border-radius:4px;border:1px solid var(--success);background:rgba(0,95,69,0.15);color:var(--success);cursor:pointer">ON</button>
+        </div>
+      </div>
     <div class="modal-btns">
       <button onclick="cerrarConfigLora()">Cancelar</button>
       <button class="ok" id="btnGuardarLora" onclick="guardarConfigLora()" style="border-color:var(--success);color:var(--success)" disabled>Guardar</button>
