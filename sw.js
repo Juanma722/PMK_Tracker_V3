@@ -1,18 +1,16 @@
 // sw.js — Service Worker PigTracker V2
-const CACHE = 'pigtracker-v10';
+const CACHE = 'pigtracker-v11';
 const BASE  = '/PMK_Tracker_V3';
 const ASSETS = [
   BASE + '/',
   BASE + '/index.html',
   'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js'
 ];
-
 self.addEventListener('install', function(e){
   e.waitUntil(
     caches.open(CACHE).then(function(c){return c.addAll(ASSETS);}).then(function(){return self.skipWaiting();})
   );
 });
-
 self.addEventListener('activate', function(e){
   e.waitUntil(
     caches.keys().then(function(keys){
@@ -20,7 +18,6 @@ self.addEventListener('activate', function(e){
     }).then(function(){return self.clients.claim();})
   );
 });
-
 self.addEventListener('fetch', function(e){
   if(e.request.method!=='GET')return;
   e.respondWith(

@@ -1,4 +1,4 @@
-<!-- PMK_Tracker_V3 index.html v8 -->
+<!-- PMK_Tracker_V3 index.html v9 -->
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -104,7 +104,18 @@ html,body{height:100%;width:100%;max-width:100vw;background:var(--bg);color:var(
 
 <header class="hdr">
   <div class="logo">PigTracker <span>by PetroMark</span></div>
-  <div style="display:flex;align-items:center;gap:8px"><div id="clock">--:--:--</div><button class="btn" onclick="abrirConfigLora()" id="cfgBtn" style="font-size:11px;padding:4px 8px">⚙</button></div>
+  <div style="display:flex;align-items:center;gap:8px">
+    <div id="clock">--:--:--</div>
+    <select id="yMaxSel" onchange="setYMax(this.value)" title="Rango eje Y" style="font-family:var(--mono);font-size:8px;padding:3px 5px;border-radius:4px;border:1px solid var(--border2);background:var(--bg3);color:var(--text);cursor:pointer">
+      <option value="400">Y 400</option>
+      <option value="800" selected>Y 800</option>
+      <option value="1500">Y 1.5k</option>
+      <option value="3000">Y 3k</option>
+      <option value="6000">Y 6k</option>
+      <option value="0">Y Auto</option>
+    </select>
+    <button class="btn" onclick="abrirConfigLora()" id="cfgBtn" style="font-size:11px;padding:4px 8px">⚙</button>
+  </div>
 </header>
 
 <div class="blebar">
@@ -139,7 +150,6 @@ html,body{height:100%;width:100%;max-width:100vw;background:var(--bg);color:var(
       <div class="prog" id="prog"><div class="bar" id="bar"></div></div>
     </div>
 
-    <!-- Detalle detección — izquierda abajo, amplio -->
     <div style="display:flex;flex-direction:column;overflow:hidden;min-height:0">
       <div class="dethdr">
         <div style="display:flex;align-items:center;justify-content:space-between">
@@ -167,7 +177,6 @@ html,body{height:100%;width:100%;max-width:100vw;background:var(--bg);color:var(
     </div>
   </div>
 
-  <!-- Historial — derecha -->
   <div class="right">
     <div style="padding:6px 10px;border-bottom:1px solid var(--border);flex-shrink:0">
       <div class="histhdr" style="margin-bottom:0">
@@ -197,7 +206,7 @@ html,body{height:100%;width:100%;max-width:100vw;background:var(--bg);color:var(
 
 <script>
 'use strict';
-console.log('PMK_Tracker_V3 v8 cargado OK');
+console.log('PMK_Tracker_V3 v9 cargado OK');
 const SVC  = '12345678-1234-1234-1234-123456789abc';
 const CFFT = 'abcd1234-ab12-cd34-ef56-abcdef123456';
 const CHST = 'abcd1234-ab12-cd34-ef56-abcdef123457';
@@ -212,6 +221,25 @@ let dev=null,cFFT=null,cHist=null,cLCFG=null,conn=false,demo=true;
 let sp=[new Float32Array(NB),new Float32Array(NB),new Float32Array(NB)];
 let bw=0,lu=[0,0,0];
 let hist=[],si=-1,dlt=0;
+
+// ── Rango eje Y ──
+window._yMaxAuto = false;
+window._yMaxVal  = 800;
+
+function setYMax(v){
+  var val = parseInt(v);
+  var auto = (val === 0);
+  window._yMaxAuto = auto;
+  window._yMaxVal  = val;
+  for(var w=0;w<3;w++){
+    mc[w].options.scales.y.max = auto ? undefined : val;
+    mc[w].update('none');
+  }
+  if(!auto){
+    cmC.options.scales.y.max = val;
+    cmC.update('none');
+  }
+}
 
 // IndexedDB
 let db=null;
@@ -249,7 +277,7 @@ const bandPlug=id=>({id,beforeDraw(c){
 
 const mO=()=>({responsive:true,maintainAspectRatio:false,animation:false,
   plugins:{legend:{display:false},tooltip:{enabled:false}},
-  scales:{x:{display:false},y:{display:false,min:0,max:800}}
+  scales:{x:{display:false},y:{display:false,min:0,max:window._yMaxVal||800}}
 });
 const gO=()=>({responsive:true,maintainAspectRatio:false,animation:false,
   plugins:{legend:{display:false},tooltip:{
@@ -320,7 +348,14 @@ function updLive(){
   }
   var bs=sp[bw],pks=findPk(bs);
   var mx2=Math.max.apply(null,Array.from(bs).concat([100]));
-  cmC.options.scales.y.max=Math.ceil(mx2*1.2);
+
+  // Respetar el rango Y seleccionado
+  if(window._yMaxAuto || !window._yMaxVal){
+    cmC.options.scales.y.max=Math.ceil(mx2*1.2);
+  } else {
+    cmC.options.scales.y.max=window._yMaxVal;
+  }
+
   cmC.data.datasets[0].data=Array.from(bs);
   var pd=new Array(NB).fill(null);
   if(pks.length){
@@ -376,7 +411,6 @@ async function toggleBLE(){
       cLCFG=await svc.getCharacteristic(CLCFG);
       await cLCFG.startNotifications();
       cLCFG.addEventListener('characteristicvaluechanged',onLoraCfgData);
-      // Leer config actual al conectar
       cLCFG.writeValue(new Uint8Array([0xC1]));
     }catch(e){console.warn('LoRaConfig char no disponible:',e.message);}
     conn=true;demo=false;
@@ -432,11 +466,7 @@ function onHistData(e){
   if(cmd===0xA1){
     dlt=(dv.getUint8(1)<<8)|dv.getUint8(2);
     var idx=(dv.getUint8(3)<<8)|dv.getUint8(4);
-    // Ignorar si ya procesamos este índice
-    if(_histIdxVisto[idx]){
-      console.log('Duplicado ignorado idx='+idx);
-      return;
-    }
+    if(_histIdxVisto[idx]){return;}
     _histIdxVisto[idx]=true;
     try{
       var bytes=new Uint8Array(dv.buffer,dv.byteOffset+5,dv.byteLength-5);
@@ -446,11 +476,10 @@ function onHistData(e){
       if(!Array.isArray(rec.fft))rec.fft=new Array(NB).fill(0);
       hist.push(rec);
       dbAdd(rec);
-    }catch(err){console.warn('JSON parse error idx='+idx+' err='+err.message+' str='+str.substring(0,80));}
+    }catch(err){console.warn('JSON parse error idx='+idx+':'+err.message);}
     var pct=dlt?Math.round((idx+1)/dlt*100):0;
     document.getElementById('bar').style.width=pct+'%';
     setS('Descargando: '+(idx+1)+'/'+dlt);
-    // Delay para evitar GATT operation already in progress
     var ack=new Uint8Array([0xA2,dv.getUint8(3),dv.getUint8(4)]);
     setTimeout(function(){
       if(cHist)cHist.writeValue(ack).catch(function(e){console.warn('ACK err:',e.message);});
@@ -495,8 +524,7 @@ function fmtTS(iso){
 
 function renderHist(){
   var list=document.getElementById('hlist');
-  document.getElementById('hcnt').textContent=
-    hist.length+' registro'+(hist.length!==1?'s':'');
+  document.getElementById('hcnt').textContent=hist.length+' registro'+(hist.length!==1?'s':'');
   list.innerHTML='';
   if(!hist.length){
     list.innerHTML='<div class="hempty">Sin detecciones guardadas</div>';
@@ -517,9 +545,7 @@ function renderHist(){
         '</div>'+
       '</div>'+
       '<div class="hbadge">22 Hz</div>';
-    div.onclick=function(){
-      selDet(parseInt(this.getAttribute('data-idx')));
-    };
+    div.onclick=function(){selDet(parseInt(this.getAttribute('data-idx')));};
     list.appendChild(div);
   }
 }
@@ -553,11 +579,8 @@ function selDet(i){
   document.querySelector('.right').scrollIntoView({behavior:'smooth',block:'nearest'});
 }
 
-
 // ── Configuración LoRa ──
-var _loraNodeId = 0;
-var _loraIsGw = false;
-var _fftActivo = true;
+var _loraNodeId=0,_loraIsGw=false,_fftActivo=true;
 
 function abrirConfigLora(){
   document.getElementById('modalLora').classList.add('show');
@@ -566,9 +589,7 @@ function abrirConfigLora(){
     document.getElementById('btnGuardarLora').disabled=true;
   }
 }
-function cerrarConfigLora(){
-  document.getElementById('modalLora').classList.remove('show');
-}
+function cerrarConfigLora(){document.getElementById('modalLora').classList.remove('show');}
 function cambiarNodeId(delta){
   _loraNodeId=Math.max(0,Math.min(253,_loraNodeId+delta));
   document.getElementById('nodeIdVal').textContent=_loraNodeId;
@@ -581,10 +602,9 @@ function setFft(val){
   document.getElementById('btnFftOff').style.borderColor=!val?'var(--danger)':'var(--border2)';
   document.getElementById('btnFftOff').style.color=!val?'var(--danger)':'var(--muted)';
   document.getElementById('btnFftOff').style.background=!val?'rgba(176,48,0,0.15)':'transparent';
-  // Enviar inmediatamente si BLE conectado
   if(cLCFG&&conn){
-    cLCFG.writeValue(new Uint8Array([0xC3, val?1:0]));
-    setS('FFT ' + (val?'activado':'desactivado'));
+    cLCFG.writeValue(new Uint8Array([0xC3,val?1:0]));
+    setS('FFT '+(val?'activado':'desactivado'));
   }
 }
 function setGateway(val){
@@ -606,18 +626,12 @@ async function guardarConfigLora(){
 function onLoraCfgData(e){
   var dv=e.target.value;
   if(dv.getUint8(0)!==0xC2)return;
-  var nodeId=dv.getUint8(1);
-  var isGw=dv.getUint8(2)===1;
-  var nextHop=dv.getUint8(3);
-  var backupHop=dv.getUint8(4);
+  var nodeId=dv.getUint8(1),isGw=dv.getUint8(2)===1;
+  var nextHop=dv.getUint8(3),backupHop=dv.getUint8(4);
   var fftOn=dv.byteLength>6?dv.getUint8(6)===1:true;
-  // Actualizar UI del modal
-  _loraNodeId=nodeId;
-  _loraIsGw=isGw;
-  _fftActivo=fftOn;
+  _loraNodeId=nodeId;_loraIsGw=isGw;_fftActivo=fftOn;
   document.getElementById('nodeIdVal').textContent=nodeId;
-  setGateway(isGw);
-  setFft(fftOn);
+  setGateway(isGw);setFft(fftOn);
   document.getElementById('loraStatus').textContent='Dispositivo conectado';
   document.getElementById('btnGuardarLora').disabled=false;
   var infoDiv=document.getElementById('loraInfoActual');
@@ -651,21 +665,21 @@ if('serviceWorker'in navigator){
         <span style="font-family:var(--mono);font-size:10px;color:var(--text)">GATEWAY</span>
         <div style="display:flex;gap:6px">
           <button id="btnNoGW" onclick="setGateway(false)" style="font-family:var(--mono);font-size:9px;padding:5px 12px;border-radius:4px;border:1px solid var(--accent);background:rgba(0,83,138,0.15);color:var(--accent);cursor:pointer">NO</button>
-          <button id="btnSiGW" onclick="setGateway(true)" style="font-family:var(--mono);font-size:9px;padding:5px 12px;border-radius:4px;border:1px solid var(--border2);background:transparent;color:var(--muted);cursor:pointer">SÍ</button>
+          <button id="btnSiGW" onclick="setGateway(true)"  style="font-family:var(--mono);font-size:9px;padding:5px 12px;border-radius:4px;border:1px solid var(--border2);background:transparent;color:var(--muted);cursor:pointer">SÍ</button>
         </div>
       </div>
       <div id="loraInfoActual" style="background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:8px;font-family:var(--mono);font-size:8px;color:var(--muted);display:none">
         <div>NEXT HOP: <span id="infoNextHop" style="color:var(--accent)">—</span></div>
         <div>BACKUP HOP: <span id="infoBackup" style="color:var(--accent)">—</span></div>
       </div>
-    </div>
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <div style="display:flex;align-items:center;justify-content:space-between">
         <span style="font-family:var(--mono);font-size:10px;color:var(--text)">FFT DETECTOR</span>
         <div style="display:flex;gap:6px">
           <button id="btnFftOff" onclick="setFft(false)" style="font-family:var(--mono);font-size:9px;padding:5px 12px;border-radius:4px;border:1px solid var(--border2);background:transparent;color:var(--muted);cursor:pointer">OFF</button>
           <button id="btnFftOn"  onclick="setFft(true)"  style="font-family:var(--mono);font-size:9px;padding:5px 12px;border-radius:4px;border:1px solid var(--success);background:rgba(0,95,69,0.15);color:var(--success);cursor:pointer">ON</button>
         </div>
       </div>
+    </div>
     <div class="modal-btns">
       <button onclick="cerrarConfigLora()">Cancelar</button>
       <button class="ok" id="btnGuardarLora" onclick="guardarConfigLora()" style="border-color:var(--success);color:var(--success)" disabled>Guardar</button>
