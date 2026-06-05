@@ -1,4 +1,4 @@
-<!-- PMK_Tracker_V3 index.html v10 -->
+<!-- PMK_Tracker_V3 index.html v11 -->
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -206,7 +206,7 @@ html,body{height:100%;width:100%;max-width:100vw;background:var(--bg);color:var(
 
 <script>
 'use strict';
-console.log('PMK_Tracker_V3 v10 cargado OK');
+console.log('PMK_Tracker_V3 v11 cargado OK');
 const SVC  = '12345678-1234-1234-1234-123456789abc';
 const CFFT = 'abcd1234-ab12-cd34-ef56-abcdef123456';
 const CHST = 'abcd1234-ab12-cd34-ef56-abcdef123457';
@@ -277,7 +277,7 @@ const bandPlug=id=>({id,beforeDraw(c){
 
 const mO=()=>({responsive:true,maintainAspectRatio:false,animation:false,
   plugins:{legend:{display:false},tooltip:{enabled:false}},
-  scales:{x:{display:false},y:{display:false,min:0,max:window._yMaxVal||800}}
+  scales:{x:{display:false},y:{display:false,min:0}}
 });
 const gO=()=>({responsive:true,maintainAspectRatio:false,animation:false,
   plugins:{legend:{display:false},tooltip:{
@@ -348,7 +348,7 @@ function updLive(){
     } else {
       mc[w].options.scales.y.max=window._yMaxVal;
     }
-    mc[w].update('none');
+    mc[w].update();
     var pk=findPk(sp[w]);
     document.getElementById('b'+w).textContent=pk.length?(pk[0].b*BR).toFixed(1)+' Hz':'— Hz';
     document.getElementById('w'+w).classList.toggle('best',w===bw);
