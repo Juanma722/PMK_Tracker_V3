@@ -1,4 +1,4 @@
-<!-- PMK_Tracker_V3 index.html v17 -->
+<!-- PMK_Tracker_V3 index.html v18 -->
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -114,6 +114,7 @@ html,body{height:100%;width:100%;max-width:100vw;background:var(--bg);color:var(
       <option value="6000">Y 6k</option>
       <option value="0">Y Auto</option>
     </select>
+    <button class="btn" onclick="abrirConfigVentana()" id="vcfgBtn" style="font-size:11px;padding:4px 8px">🕐</button>
     <button class="btn" onclick="abrirConfigLora()" id="cfgBtn" style="font-size:11px;padding:4px 8px">⚙</button>
   </div>
 </header>
@@ -136,13 +137,13 @@ html,body{height:100%;width:100%;max-width:100vw;background:var(--bg);color:var(
         <div class="metric"><div class="mlbl">Detección</div><div class="mval err" id="mD">NO</div></div>
       </div>
       <div class="wins">
-        <div class="win" id="w0"><div class="wtitle">V1/3 t=0ms <b id="b0">— Hz</b></div><div class="cv"><canvas id="c0"></canvas></div></div>
-        <div class="win" id="w1"><div class="wtitle">V2/3 t=200ms <b id="b1">— Hz</b></div><div class="cv"><canvas id="c1"></canvas></div></div>
-        <div class="win" id="w2"><div class="wtitle">V3/3 t=400ms <b id="b2">— Hz</b></div><div class="cv"><canvas id="c2"></canvas></div></div>
+        <div class="win" id="w0"><div class="wtitle"><span id="wl0">V-/7 t=-ms</span> <b id="b0">— Hz</b></div><div class="cv"><canvas id="c0"></canvas></div></div>
+        <div class="win" id="w1"><div class="wtitle"><span id="wl1">V-/7 t=-ms</span> <b id="b1">— Hz</b></div><div class="cv"><canvas id="c1"></canvas></div></div>
+        <div class="win" id="w2"><div class="wtitle"><span id="wl2">V-/7 t=-ms</span> <b id="b2">— Hz</b></div><div class="cv"><canvas id="c2"></canvas></div></div>
       </div>
       <div class="maincard">
         <div class="mainhdr">
-          <div class="maintitle">Mejor ventana — 0 a 75 Hz | Δf=2.34 Hz/bin | Solapamiento 50%</div>
+          <div class="maintitle">Mejor ventana — 0 a 64 Hz | Δf=2.00 Hz/bin | Solapamiento ~70%</div>
           <div class="ptag" id="ptag">P1: — Hz</div>
         </div>
         <div class="maincv"><canvas id="cm"></canvas></div>
@@ -211,13 +212,19 @@ const SVC  = '12345678-1234-1234-1234-123456789abc';
 const CFFT = 'abcd1234-ab12-cd34-ef56-abcdef123456';
 const CHST = 'abcd1234-ab12-cd34-ef56-abcdef123457';
 const CLCFG= 'abcd1234-ab12-cd34-ef56-abcdef123458';
-const NB=32,BR=150/64,TG=22;
+const CVCFG= 'abcd1234-ab12-cd34-ef56-abcdef12345a';
+const NB=32,BR=128/64,TG=22;   // BR = resolución de bin (Hz) = SAMPLING_FREQ/SAMPLES
+                                // del firmware (128Hz/64). Antes decía 150/64 — quedó
+                                // desactualizado desde que el firmware bajó a 128Hz
+                                // (ver comentario en V5_4_Medicion_ADS1115.ino).
+const NUM_WIN=7,WIN_STEP_MS=19*1000/128;   // deben coincidir con NUM_WINDOWS y
+                                            // WINDOW_STEP_SAMPLES/SAMPLING_FREQ del .ino
 const BL=Math.max(1,Math.round((TG-2.5)/BR));
 const BH=Math.min(NB-1,Math.round((TG+2.5)/BR));
 const BT=Math.round(TG/BR);
 const LBL=Array.from({length:NB},(_,i)=>(i*BR).toFixed(1));
 
-let dev=null,cFFT=null,cHist=null,cLCFG=null,conn=false,demo=true;
+let dev=null,cFFT=null,cHist=null,cLCFG=null,cVCFG=null,conn=false,demo=true;
 let sp=[new Float32Array(NB),new Float32Array(NB),new Float32Array(NB)];
 let bw=0,lu=[0,0,0];
 let hist=[],si=-1,dlt=0;
@@ -420,6 +427,12 @@ async function toggleBLE(){
       cLCFG.addEventListener('characteristicvaluechanged',onLoraCfgData);
       cLCFG.writeValue(new Uint8Array([0xC1]));
     }catch(e){console.warn('LoRaConfig char no disponible:',e.message);}
+    try{
+      cVCFG=await svc.getCharacteristic(CVCFG);
+      await cVCFG.startNotifications();
+      cVCFG.addEventListener('characteristicvaluechanged',onVentanaCfgData);
+      cVCFG.writeValue(new Uint8Array([0xD1]));   // GET — pedir config actual
+    }catch(e){console.warn('VentanaConfig char no disponible:',e.message);}
     conn=true;demo=false;
     document.getElementById('dot').className='dot on';
     document.getElementById('blebtn').textContent='DESCONECTAR';
@@ -448,7 +461,9 @@ function onFFT(e){
     el.className='mval '+(ok?'ok':'err');
     return;
   }
-  var w=t%3,r=new Float32Array(NB);
+  var winIdx=t, w=t%3, r=new Float32Array(NB);
+  document.getElementById('wl'+w).textContent =
+    'V'+(winIdx+1)+'/'+NUM_WIN+' t='+Math.round(winIdx*WIN_STEP_MS)+'ms';
   for(var i=0;i<NB;i++)r[i]=(dv.getUint8(1+i*2)<<8)|dv.getUint8(2+i*2);
   proc(r,w);updLive();
 }
@@ -649,6 +664,64 @@ function onLoraCfgData(e){
   }
 }
 
+// ── Configuración de ventana horaria (VentanaConfigBLE) ──
+function epochToLocalInputStr(t){
+  if(!t)return '';
+  var d=new Date(t*1000),pad=n=>String(n).padStart(2,'0');
+  return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+'T'+pad(d.getHours())+':'+pad(d.getMinutes());
+}
+function abrirConfigVentana(){
+  document.getElementById('modalVentana').classList.add('show');
+  if(!conn){
+    document.getElementById('vcfgStatus').textContent='Conectá el dispositivo para configurar';
+  }else if(cVCFG){
+    cVCFG.writeValue(new Uint8Array([0xD1])).catch(()=>{});  // refrescar al abrir
+  }
+}
+function cerrarConfigVentana(){document.getElementById('modalVentana').classList.remove('show');}
+async function guardarVentana(){
+  if(!cVCFG||!conn)return;
+  var tStr=document.getElementById('vcfgInicio').value;
+  var vel=parseFloat(document.getElementById('vcfgVel').value);
+  var dist=parseInt(document.getElementById('vcfgDist').value,10);
+  var margenMin=parseFloat(document.getElementById('vcfgMargen').value);
+  if(!tStr||isNaN(vel)||isNaN(dist)||isNaN(margenMin)){
+    document.getElementById('vcfgStatus').textContent='Completá todos los campos';
+    return;
+  }
+  var tInicio=Math.floor(new Date(tStr).getTime()/1000);
+  var velX100=Math.max(0,Math.min(65535,Math.round(vel*100)));
+  var distM=Math.max(0,Math.min(65535,Math.round(dist)));
+  var margenSeg=Math.max(0,Math.round(margenMin*60));
+
+  var buf=new Uint8Array(13);
+  buf[0]=0xD0;
+  buf[1]=(tInicio>>>24)&0xFF;buf[2]=(tInicio>>>16)&0xFF;buf[3]=(tInicio>>>8)&0xFF;buf[4]=tInicio&0xFF;
+  buf[5]=(velX100>>>8)&0xFF;buf[6]=velX100&0xFF;
+  buf[7]=(distM>>>8)&0xFF;buf[8]=distM&0xFF;
+  buf[9]=(margenSeg>>>24)&0xFF;buf[10]=(margenSeg>>>16)&0xFF;buf[11]=(margenSeg>>>8)&0xFF;buf[12]=margenSeg&0xFF;
+
+  document.getElementById('vcfgStatus').textContent='Guardando...';
+  await cVCFG.writeValue(buf);
+  // La confirmación llega por notify (0xD2) y actualiza el status en onVentanaCfgData
+}
+function onVentanaCfgData(e){
+  var dv=e.target.value;
+  if(dv.byteLength<14||dv.getUint8(0)!==0xD2)return;
+  var tInicio=(dv.getUint8(1)*16777216+dv.getUint8(2)*65536+dv.getUint8(3)*256+dv.getUint8(4))>>>0;
+  var velX100=(dv.getUint8(5)<<8)|dv.getUint8(6);
+  var distM=(dv.getUint8(7)<<8)|dv.getUint8(8);
+  var margen=(dv.getUint8(9)*16777216+dv.getUint8(10)*65536+dv.getUint8(11)*256+dv.getUint8(12))>>>0;
+  var configurada=dv.getUint8(13)===1;
+
+  document.getElementById('vcfgInicio').value=epochToLocalInputStr(tInicio);
+  document.getElementById('vcfgVel').value=(velX100/100).toFixed(2);
+  document.getElementById('vcfgDist').value=distM;
+  document.getElementById('vcfgMargen').value=Math.round(margen/60);
+  document.getElementById('vcfgStatus').textContent=configurada
+    ?'Ventana configurada y activa':'Sin configurar — completá los campos';
+}
+
 if('serviceWorker'in navigator){
   navigator.serviceWorker.register('/PMK_Tracker_V3/sw.js').catch(function(){});
 }
@@ -690,6 +763,36 @@ if('serviceWorker'in navigator){
     <div class="modal-btns">
       <button onclick="cerrarConfigLora()">Cancelar</button>
       <button class="ok" id="btnGuardarLora" onclick="guardarConfigLora()" style="border-color:var(--success);color:var(--success)" disabled>Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal configuración de ventana horaria -->
+<div class="modal-ov" id="modalVentana">
+  <div class="modal" style="max-width:320px;text-align:left">
+    <h3 style="text-align:center">VENTANA HORARIA</h3>
+    <p id="vcfgStatus" style="font-family:var(--mono);font-size:9px;color:var(--muted);margin-bottom:14px;text-align:center">Conectá el dispositivo para configurar</p>
+    <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px;font-family:var(--mono);font-size:10px;color:var(--text)">
+      <label style="display:flex;flex-direction:column;gap:3px">
+        Inicio de maniobra (hora local)
+        <input type="datetime-local" id="vcfgInicio" style="padding:6px;border:1px solid var(--border2);border-radius:4px;background:var(--bg3);color:var(--text);font-family:var(--mono);font-size:10px">
+      </label>
+      <label style="display:flex;flex-direction:column;gap:3px">
+        Velocidad del pig (m/s)
+        <input type="number" id="vcfgVel" min="0.1" max="5" step="0.1" placeholder="1.5" style="padding:6px;border:1px solid var(--border2);border-radius:4px;background:var(--bg3);color:var(--text);font-family:var(--mono);font-size:10px">
+      </label>
+      <label style="display:flex;flex-direction:column;gap:3px">
+        Distancia hasta este sensor (m)
+        <input type="number" id="vcfgDist" min="100" max="50000" step="100" placeholder="5000" style="padding:6px;border:1px solid var(--border2);border-radius:4px;background:var(--bg3);color:var(--text);font-family:var(--mono);font-size:10px">
+      </label>
+      <label style="display:flex;flex-direction:column;gap:3px">
+        Margen de tolerancia (minutos, ± a cada lado)
+        <input type="number" id="vcfgMargen" min="1" max="600" step="5" placeholder="60" style="padding:6px;border:1px solid var(--border2);border-radius:4px;background:var(--bg3);color:var(--text);font-family:var(--mono);font-size:10px">
+      </label>
+    </div>
+    <div class="modal-btns">
+      <button onclick="cerrarConfigVentana()">Cancelar</button>
+      <button class="ok" onclick="guardarVentana()" style="border-color:var(--success);color:var(--success)">Guardar</button>
     </div>
   </div>
 </div>

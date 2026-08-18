@@ -1,9 +1,12 @@
 // sw.js — Service Worker PigTracker V2
-const CACHE = 'pigtracker-v17';
+const CACHE = 'pigtracker-v18';
 const BASE  = '/PMK_Tracker_V3';
 const ASSETS = [
   BASE + '/',
   BASE + '/index.html',
+  BASE + '/manifest.json',
+  BASE + '/icon192.png',
+  BASE + '/icon512.png',
   'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js'
 ];
 self.addEventListener('install', function(e){
