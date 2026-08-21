@@ -1,4 +1,4 @@
-<!-- PMK_Tracker_V3 index.html v18 -->
+<!-- PMK_Tracker_V3 index.html v19 — gráfico principal driven por el firmware, sin paneles de preview -->
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -47,14 +47,8 @@ html,body{height:100%;width:100%;max-width:100vw;background:var(--bg);color:var(
 .mlbl{font-family:var(--mono);font-size:8px;color:var(--muted);letter-spacing:1px;text-transform:uppercase;margin-bottom:1px}
 .mval{font-family:var(--mono);font-size:14px;font-weight:600;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ok{color:var(--success)}.err{color:var(--danger)}
-.wins{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin-bottom:6px;width:100%;min-width:0}
-.win{background:var(--bg3);border:1px solid var(--border);border-radius:5px;padding:4px 4px 2px;min-width:0;overflow:hidden}
-.win.best{border-color:var(--accent);background:#c8dff0}
-.wtitle{font-family:var(--mono);font-size:7px;color:var(--muted);margin-bottom:2px;display:flex;justify-content:space-between;white-space:nowrap;overflow:hidden}
-.wtitle b{color:var(--accent2);font-weight:600;font-size:7px}
-.cv{position:relative;height:58px;width:100%}
-.cv canvas{position:absolute;top:0;left:0;width:100%!important;height:100%!important}
 .maincard{background:var(--bg3);border:1px solid var(--border);border-radius:5px;padding:6px 6px 4px;margin-bottom:4px;width:100%;box-sizing:border-box}
+.winprog{font-family:var(--mono);font-size:8px;color:var(--muted);letter-spacing:.5px;text-align:center;height:12px;line-height:12px;opacity:.8}
 .mainhdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;gap:6px}
 .maintitle{font-family:var(--mono);font-size:7px;color:var(--muted);letter-spacing:.5px;text-transform:uppercase;white-space:nowrap}
 .ptag{font-family:var(--mono);font-size:8px;padding:1px 6px;border-radius:3px;border:1px solid var(--border2);color:var(--accent2);white-space:nowrap;flex-shrink:0}
@@ -136,17 +130,13 @@ html,body{height:100%;width:100%;max-width:100vw;background:var(--bg);color:var(
         <div class="metric"><div class="mlbl">SNR</div><div class="mval" id="mS">—</div></div>
         <div class="metric"><div class="mlbl">Detección</div><div class="mval err" id="mD">NO</div></div>
       </div>
-      <div class="wins">
-        <div class="win" id="w0"><div class="wtitle"><span id="wl0">V-/7 t=-ms</span> <b id="b0">— Hz</b></div><div class="cv"><canvas id="c0"></canvas></div></div>
-        <div class="win" id="w1"><div class="wtitle"><span id="wl1">V-/7 t=-ms</span> <b id="b1">— Hz</b></div><div class="cv"><canvas id="c1"></canvas></div></div>
-        <div class="win" id="w2"><div class="wtitle"><span id="wl2">V-/7 t=-ms</span> <b id="b2">— Hz</b></div><div class="cv"><canvas id="c2"></canvas></div></div>
-      </div>
       <div class="maincard">
         <div class="mainhdr">
           <div class="maintitle">Mejor ventana — 0 a 64 Hz | Δf=2.00 Hz/bin | Solapamiento ~70%</div>
           <div class="ptag" id="ptag">P1: — Hz</div>
         </div>
         <div class="maincv"><canvas id="cm"></canvas></div>
+        <div class="winprog" id="winProg"></div>
       </div>
       <div class="prog" id="prog"><div class="bar" id="bar"></div></div>
     </div>
@@ -207,7 +197,7 @@ html,body{height:100%;width:100%;max-width:100vw;background:var(--bg);color:var(
 
 <script>
 'use strict';
-console.log('PMK_Tracker_V3 v17 cargado OK');
+console.log('PMK_Tracker_V3 v19 cargado OK — grafico principal = espectro ganador del firmware');
 const SVC  = '12345678-1234-1234-1234-123456789abc';
 const CFFT = 'abcd1234-ab12-cd34-ef56-abcdef123456';
 const CHST = 'abcd1234-ab12-cd34-ef56-abcdef123457';
@@ -225,8 +215,7 @@ const BT=Math.round(TG/BR);
 const LBL=Array.from({length:NB},(_,i)=>(i*BR).toFixed(1));
 
 let dev=null,cFFT=null,cHist=null,cLCFG=null,cVCFG=null,conn=false,demo=true;
-let sp=[new Float32Array(NB),new Float32Array(NB),new Float32Array(NB)];
-let bw=0,lu=[0,0,0];
+let sp=new Float32Array(NB);   // único buffer: espectro de la ventana ganadora (llega ya elegida por el firmware)
 let hist=[],si=-1,dlt=0;
 
 // ── Rango eje Y ──
@@ -238,10 +227,6 @@ function setYMax(v){
   var auto = (val === 0);
   window._yMaxAuto = auto;
   window._yMaxVal  = val;
-  for(var w=0;w<3;w++){
-    mc[w].options.scales.y.max = auto ? undefined : val;
-    mc[w].update('none');
-  }
   if(!auto){
     cmC.options.scales.y.max = val;
     cmC.update('none');
@@ -282,10 +267,6 @@ const bandPlug=id=>({id,beforeDraw(c){
   ctx.setLineDash([]);ctx.restore();
 }});
 
-const mO=()=>({responsive:true,maintainAspectRatio:false,animation:false,
-  plugins:{legend:{display:false},tooltip:{enabled:false}},
-  scales:{x:{display:false},y:{display:false,min:0}}
-});
 const gO=()=>({responsive:true,maintainAspectRatio:false,animation:false,
   plugins:{legend:{display:false},tooltip:{
     backgroundColor:'#f0f5fc',borderColor:'#aabdd8',borderWidth:1,
@@ -302,13 +283,6 @@ const gO=()=>({responsive:true,maintainAspectRatio:false,animation:false,
     y:{min:0,max:800,grid:{color:'#aabdd8'},ticks:{color:'#42607e',font:{family:'IBM Plex Mono',size:8},maxTicksLimit:5,callback:v=>v>=1000?(v/1000).toFixed(0)+'k':v},border:{color:'#aabdd8'}}
   }
 });
-
-const COLS=['#00538a','#007ba7','#4a90b8'];
-const mc=COLS.map((c,w)=>new Chart(document.getElementById('c'+w),{
-  type:'line',
-  data:{labels:LBL,datasets:[{data:new Array(NB).fill(0),borderColor:c,borderWidth:1.2,pointRadius:0,fill:false,tension:0.3}]},
-  options:mO(),plugins:[bandPlug('b'+w)]
-}));
 
 const cmC=new Chart(document.getElementById('cm'),{
   type:'line',
@@ -328,71 +302,43 @@ const cdC=new Chart(document.getElementById('cd'),{
   options:gO(),plugins:[bandPlug('bd')]
 });
 
-function bE(s){let e=0;for(let i=BL;i<=BH;i++)e+=s[i]*s[i];return e;}
-function findPk(a){
-  var p=[];
-  for(var i=1;i<a.length-1;i++)
-    if(a[i]>a[i-1]&&a[i]>a[i+1]&&a[i]>30)p.push({b:i,v:a[i]});
-  return p.sort(function(a,b){return b.v-a.v;});
-}
-function proc(r,w){for(var i=0;i<NB;i++)sp[w][i]=sp[w][i]*0.2+r[i]*0.8;}
-function calcSNR(s,b){
-  var sm=0,c=0;
-  for(var i=1;i<NB;i++)if(Math.abs(i-b)>2){sm+=s[i];c++;}
-  var n=c?sm/c:0.001;
-  return n?(s[b]/n).toFixed(1):'—';
-}
-
-function updLive(){
-  var mx=-1;
-  for(var w=0;w<3;w++){var e=bE(sp[w]);if(e>mx){mx=e;bw=w;}}
-  for(var w=0;w<3;w++){
-    mc[w].data.datasets[0].data=Array.from(sp[w]);
-    // Autoescalar cada mini gráfico según su propio máximo
-    var mxW=Math.max.apply(null,Array.from(sp[w]).concat([100]));
-    if(window._yMaxAuto||!window._yMaxVal){
-      mc[w].options.scales.y.max=Math.ceil(mxW*1.2);
-    } else {
-      mc[w].options.scales.y.max=window._yMaxVal;
-    }
-    mc[w].update();
-    var pk=findPk(sp[w]);
-    document.getElementById('b'+w).textContent=pk.length?(pk[0].b*BR).toFixed(1)+' Hz':'— Hz';
-    document.getElementById('w'+w).classList.toggle('best',w===bw);
-  }
-  var bs=sp[bw],pks=findPk(bs);
-  var mx2=Math.max.apply(null,Array.from(bs).concat([100]));
-
-  // Respetar el rango Y seleccionado
+// Dibuja el gráfico principal con el espectro que el FIRMWARE ya eligió
+// como ganador del ciclo (llega en el paquete 0xFF, bytes 9-72). No se
+// recalcula "cuál es la mejor ventana" del lado del cliente — antes esa
+// heurística (energía total sobre 3 paneles plegados módulo 3) no
+// correspondía a ninguna ventana real ni al criterio del firmware
+// (bandRatio). fr/mag ya vienen calculados por el firmware también
+// (interpolación sub-bin incluida), así que el marcador de pico usa esos
+// valores en vez de recalcularlos del lado del cliente.
+function drawMain(r, fr, mag){
+  sp=r;
+  var mx=Math.max.apply(null,Array.from(r).concat([100]));
   if(window._yMaxAuto || !window._yMaxVal){
-    cmC.options.scales.y.max=Math.ceil(mx2*1.2);
+    cmC.options.scales.y.max=Math.ceil(mx*1.2);
   } else {
     cmC.options.scales.y.max=window._yMaxVal;
   }
-
-  cmC.data.datasets[0].data=Array.from(bs);
+  cmC.data.datasets[0].data=Array.from(r);
   var pd=new Array(NB).fill(null);
-  if(pks.length){
-    pd[pks[0].b]=pks[0].v;
-    document.getElementById('ptag').textContent='P1: '+(pks[0].b*BR).toFixed(2)+' Hz';
-    document.getElementById('mF').textContent=(pks[0].b*BR).toFixed(2)+' Hz';
-    document.getElementById('mM').textContent=pks[0].v.toFixed(0);
-    document.getElementById('mS').textContent=calcSNR(bs,pks[0].b);
+  var bin=Math.round(fr/BR);
+  if(bin>=0 && bin<NB){
+    pd[bin]=mag>0?mag:r[bin];
+    document.getElementById('ptag').textContent='P1: '+fr.toFixed(2)+' Hz';
   }
   cmC.data.datasets[1].data=pd;
   cmC.update('none');
 }
 
-function demoW(w){
-  var o=new Float32Array(NB),a=[420,680,280];
+function demoBest(){
+  var o=new Float32Array(NB);
   for(var i=1;i<NB;i++){
-    var v=a[w]*Math.exp(-Math.pow((i-BT)/1.1,2));
+    var v=560*Math.exp(-Math.pow((i-BT)/1.1,2));
     v+=150*Math.exp(-Math.pow((i-18)/2,2))+60*Math.random();
     o[i]=Math.max(0,v);
   }
   return o;
 }
-var lck=0;
+var lck=0,lu=0;
 function loop(ts){
   requestAnimationFrame(loop);
   if(ts-lck>500){
@@ -401,8 +347,16 @@ function loop(ts){
       new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
   }
   if(!demo)return;
-  for(var w=0;w<3;w++){if(ts-lu[w]>700+w*220){lu[w]=ts;proc(demoW(w),w);}}
-  updLive();
+  if(ts-lu>1330){   // simula un ciclo completo (CYCLE_INTERVAL_MS del firmware)
+    lu=ts;
+    var r=demoBest();
+    var pb=BL,pv=0;
+    for(var i=BL;i<=BH;i++)if(r[i]>pv){pv=r[i];pb=i;}
+    drawMain(r, pb*BR, pv);
+    document.getElementById('mF').textContent=(pb*BR).toFixed(2)+' Hz';
+    document.getElementById('mM').textContent=pv.toFixed(0);
+    document.getElementById('mS').textContent=(8+Math.random()*4).toFixed(1);
+  }
 }
 requestAnimationFrame(loop);
 
@@ -459,13 +413,23 @@ function onFFT(e){
     var el=document.getElementById('mD');
     el.textContent=ok?'SÍ':'NO';
     el.className='mval '+(ok?'ok':'err');
+
+    // Espectro de la ventana ganadora — bytes 9..9+2*NB-1 (ver protocolo
+    // actualizado en el .ino). Si por algún motivo llega un paquete viejo
+    // de 9 bytes (firmware sin actualizar), se ignora el gráfico y se
+    // deja lo último dibujado — no rompe nada, solo no actualiza.
+    if(dv.byteLength>=9+NB*2){
+      var r=new Float32Array(NB);
+      for(var i=0;i<NB;i++)r[i]=(dv.getUint8(9+i*2)<<8)|dv.getUint8(9+i*2+1);
+      drawMain(r,fr,mag);
+    }
+    document.getElementById('winProg').textContent='';
     return;
   }
-  var winIdx=t, w=t%3, r=new Float32Array(NB);
-  document.getElementById('wl'+w).textContent =
-    'V'+(winIdx+1)+'/'+NUM_WIN+' t='+Math.round(winIdx*WIN_STEP_MS)+'ms';
-  for(var i=0;i<NB;i++)r[i]=(dv.getUint8(1+i*2)<<8)|dv.getUint8(2+i*2);
-  proc(r,w);updLive();
+  // Paquete de ventana individual (0..6): ya no se grafica (ver nota de
+  // arriba) — solo se usa como indicador de progreso en vivo del ciclo.
+  document.getElementById('winProg').textContent =
+    'Analizando ventana '+(t+1)+'/'+NUM_WIN+'…';
 }
 
 async function dlHist(){
