@@ -206,7 +206,7 @@ html,body{height:100%;width:100%;max-width:100vw;background:var(--bg);color:var(
 
 <script>
 'use strict';
-console.log('PMK_Tracker_V3 v18 cargado OK');
+console.log('PMK_Tracker_V3 v19 cargado OK');
 const SVC  = '12345678-1234-1234-1234-123456789abc';
 const CFFT = 'abcd1234-ab12-cd34-ef56-abcdef123456';
 const CHST = 'abcd1234-ab12-cd34-ef56-abcdef123457';
@@ -423,7 +423,7 @@ async function toggleBLE(){
       cLCFG=await svc.getCharacteristic(CLCFG);
       await cLCFG.startNotifications();
       cLCFG.addEventListener('characteristicvaluechanged',onLoraCfgData);
-      cLCFG.writeValue(new Uint8Array([0xC1]));
+      lcfgWrite([0xC1]);
     }catch(e){console.warn('LoRaConfig char no disponible:',e.message);}
     conn=true;demo=false;
     document.getElementById('dot').className='dot on';
@@ -509,7 +509,10 @@ function onHistData(e){
 }
 
 function onDisc(){
-  conn=false;demo=true;cFFT=null;cHist=null;
+  pararStats();
+  conn=false;demo=true;cFFT=null;cHist=null;cLCFG=null;
+  _lcfgCola=Promise.resolve();
+  document.getElementById('loraStats').style.display='none';
   document.getElementById('dot').className='dot';
   document.getElementById('blebtn').textContent='RECONECTAR';
   document.getElementById('blebtn').className='btn';
@@ -601,14 +604,24 @@ function abrirConfigLora(){
   if(!conn){
     document.getElementById('loraStatus').textContent='Conectá el dispositivo para configurar';
     document.getElementById('btnGuardarLora').disabled=true;
+  }else{
+    lcfgWrite([0xC1]);   // refrescar config al abrir
+    arrancarStats();
   }
 }
-function cerrarConfigLora(){document.getElementById('modalLora').classList.remove('show');}
+function cerrarConfigLora(){
+  pararStats();
+  document.getElementById('modalLora').classList.remove('show');
+}
 function cambiarNodeId(delta){
   _loraNodeId=Math.max(0,Math.min(253,_loraNodeId+delta));
   document.getElementById('nodeIdVal').textContent=_loraNodeId;
 }
-function setFft(val){
+// Solo pinta los botones. Antes setFft() escribía el 0xC3 también
+// cuando la llamaba onLoraCfgData(), y como el firmware responde al
+// 0xC3 con un notify de config, quedaba un ping-pong infinito
+// app→placa→app. Ahora el write lo hace únicamente setFft().
+function pintarFft(val){
   _fftActivo=val;
   document.getElementById('btnFftOn').style.borderColor=val?'var(--success)':'var(--border2)';
   document.getElementById('btnFftOn').style.color=val?'var(--success)':'var(--muted)';
@@ -616,8 +629,11 @@ function setFft(val){
   document.getElementById('btnFftOff').style.borderColor=!val?'var(--danger)':'var(--border2)';
   document.getElementById('btnFftOff').style.color=!val?'var(--danger)':'var(--muted)';
   document.getElementById('btnFftOff').style.background=!val?'rgba(176,48,0,0.15)':'transparent';
+}
+function setFft(val){
+  pintarFft(val);
   if(cLCFG&&conn){
-    cLCFG.writeValue(new Uint8Array([0xC3,val?1:0]));
+    lcfgWrite([0xC3,val?1:0]);
     setS('FFT '+(val?'activado':'desactivado'));
   }
 }
@@ -634,26 +650,114 @@ async function guardarConfigLora(){
   if(!cLCFG||!conn)return;
   document.getElementById('loraStatus').textContent='Guardando y reiniciando...';
   document.getElementById('btnGuardarLora').disabled=true;
-  await cLCFG.writeValue(new Uint8Array([0xC0,_loraNodeId,_loraIsGw?1:0]));
+  await lcfgWrite([0xC0,_loraNodeId,_loraIsGw?1:0]);
   setTimeout(()=>{cerrarConfigLora();setS('Nodo LoRa configurado — reconectá el dispositivo');},2000);
 }
+// ── Cola de escritura BLE ──
+// Web Bluetooth tira NotSupportedError si se solapan dos writeValue()
+// sobre la misma característica. Se serializan en una promesa.
+var _lcfgCola=Promise.resolve();
+function lcfgWrite(arr){
+  if(!cLCFG||!conn)return Promise.resolve();
+  _lcfgCola=_lcfgCola
+    .then(function(){return cLCFG.writeValue(new Uint8Array(arr));})
+    .catch(function(err){console.warn('LCFG write:',err.message);});
+  return _lcfgCola;
+}
+
+// ── Comandos que antes eran del puerto serie ──
+function pedirStats(){ lcfgWrite([0xC9]); }                  // i / s
+
+function cmdDescubrir(){                                     // g
+  setS('Iniciando descubrimiento...');
+  lcfgWrite([0xC4]);
+}
+
+function cmdDeteccion(){                                     // d
+  setS('Enviando detección de prueba...');
+  lcfgWrite([0xC5]);
+}
+
+function cmdForzarHop(){                                     // n
+  var v=parseInt(document.getElementById('inNextHop').value,10);
+  if(isNaN(v)||v<0||v>255){setS('NEXT_HOP inválido (0-255)');return;}
+  lcfgWrite([0xC6,v]);
+}
+
+function cmdBorrarHist(){                                    // e
+  if(!confirm('¿Borrar el historial de detecciones de este nodo? No se puede deshacer.'))return;
+  lcfgWrite([0xC8]);
+}
+
+// Refresco de estadísticas mientras el modal está abierto
+var _statsTimer=null;
+function arrancarStats(){
+  if(_statsTimer)return;
+  pedirStats();
+  _statsTimer=setInterval(function(){if(conn)pedirStats();},3000);
+}
+function pararStats(){
+  if(_statsTimer){clearInterval(_statsTimer);_statsTimer=null;}
+}
+
 function onLoraCfgData(e){
-  var dv=e.target.value;
-  if(dv.getUint8(0)!==0xC2)return;
+  var dv=e.target.value,tipo=dv.getUint8(0);
+  if(tipo===0xC2)      onCfgResp(dv);
+  else if(tipo===0xC7) onStatsResp(dv);
+  else if(tipo===0xCA) onCmdAck(dv);
+}
+
+// ── 0xC2: config del nodo ──
+function onCfgResp(dv){
   var nodeId=dv.getUint8(1),isGw=dv.getUint8(2)===1;
   var nextHop=dv.getUint8(3),backupHop=dv.getUint8(4);
   var fftOn=dv.byteLength>6?dv.getUint8(6)===1:true;
-  _loraNodeId=nodeId;_loraIsGw=isGw;_fftActivo=fftOn;
+  _loraNodeId=nodeId;_loraIsGw=isGw;
   document.getElementById('nodeIdVal').textContent=nodeId;
-  setGateway(isGw);setFft(fftOn);
+  setGateway(isGw);pintarFft(fftOn);
   document.getElementById('loraStatus').textContent='Dispositivo conectado';
   document.getElementById('btnGuardarLora').disabled=false;
+  // El gateway no envía detecciones y los nodos no descubren
+  document.getElementById('btnDescubrir').disabled=!isGw;
+  document.getElementById('btnDeteccion').disabled=isGw;
   var infoDiv=document.getElementById('loraInfoActual');
   if(nextHop!==255){
     infoDiv.style.display='block';
     document.getElementById('infoNextHop').textContent=nextHop;
     document.getElementById('infoBackup').textContent=backupHop===255?'Sin descubrir':backupHop;
   }
+}
+
+// ── 0xC7: estadísticas (reemplaza a los comandos serial i y s) ──
+function onStatsResp(dv){
+  if(dv.byteLength<15)return;
+  var gwId=dv.getUint8(1),nextHop=dv.getUint8(2),backupHop=dv.getUint8(3);
+  var tx=dv.getUint16(4),rx=dv.getUint16(6),fallos=dv.getUint16(8);
+  var rssi=dv.getInt16(10),nHist=dv.getUint16(12),flags=dv.getUint8(14);
+  var hop=function(v){return v===255?'—':v;};
+  document.getElementById('stGw').textContent=hop(gwId);
+  document.getElementById('stNext').textContent=hop(nextHop);
+  document.getElementById('stBackup').textContent=hop(backupHop);
+  document.getElementById('stTx').textContent=tx;
+  document.getElementById('stRx').textContent=rx;
+  document.getElementById('stFallos').textContent=fallos;
+  document.getElementById('stRssi').textContent=rssi===0?'—':rssi+' dBm';
+  document.getElementById('stHist').textContent=nHist;
+  document.getElementById('stGps').textContent=(flags&0x04)?'FIX':'sin fix';
+  document.getElementById('stGps').style.color=(flags&0x04)?'var(--success)':'var(--danger)';
+  document.getElementById('stTxState').textContent=(flags&0x08)?'TX':'RX';
+  document.getElementById('loraStats').style.display='block';
+}
+
+// ── 0xCA: ACK de comando ──
+function onCmdAck(dv){
+  if(dv.byteLength<3)return;
+  var cmd=dv.getUint8(1),res=dv.getUint8(2);
+  var nombre={0xC4:'Descubrimiento',0xC5:'Detección de prueba',
+              0xC6:'NEXT_HOP forzado',0xC8:'Historial borrado'}[cmd]||('Cmd 0x'+cmd.toString(16));
+  setS(nombre+(res===0?' — OK':' — rechazado por el nodo'));
+  if(res===0&&cmd===0xC8)hist=[];
+  pedirStats();
 }
 
 if('serviceWorker'in navigator){
@@ -686,6 +790,13 @@ if('serviceWorker'in navigator){
         <div>NEXT HOP: <span id="infoNextHop" style="color:var(--accent)">—</span></div>
         <div>BACKUP HOP: <span id="infoBackup" style="color:var(--accent)">—</span></div>
       </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+        <span style="font-family:var(--mono);font-size:10px;color:var(--text)">NEXT HOP MANUAL</span>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input type="number" id="inNextHop" min="0" max="255" placeholder="—" style="width:52px;padding:4px 6px;border:1px solid var(--border2);border-radius:4px;background:var(--bg3);color:var(--text);font-family:var(--mono);font-size:10px;text-align:center">
+          <button onclick="cmdForzarHop()" style="font-family:var(--mono);font-size:9px;padding:5px 10px;border-radius:4px;border:1px solid var(--border2);background:transparent;color:var(--text);cursor:pointer">FORZAR</button>
+        </div>
+      </div>
       <div style="display:flex;align-items:center;justify-content:space-between">
         <span style="font-family:var(--mono);font-size:10px;color:var(--text)">FFT DETECTOR</span>
         <div style="display:flex;gap:6px">
@@ -694,6 +805,30 @@ if('serviceWorker'in navigator){
         </div>
       </div>
     </div>
+      <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:2px">
+        <div style="font-family:var(--mono);font-size:9px;color:var(--muted);margin-bottom:8px">COMANDOS</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+          <button id="btnDescubrir" onclick="cmdDescubrir()" style="font-family:var(--mono);font-size:9px;padding:7px 4px;border-radius:4px;border:1px solid var(--accent);background:transparent;color:var(--accent);cursor:pointer">DESCUBRIR</button>
+          <button id="btnDeteccion" onclick="cmdDeteccion()" style="font-family:var(--mono);font-size:9px;padding:7px 4px;border-radius:4px;border:1px solid var(--accent);background:transparent;color:var(--accent);cursor:pointer">DET. PRUEBA</button>
+          <button onclick="pedirStats()" style="font-family:var(--mono);font-size:9px;padding:7px 4px;border-radius:4px;border:1px solid var(--border2);background:transparent;color:var(--text);cursor:pointer">REFRESCAR</button>
+          <button onclick="cmdBorrarHist()" style="font-family:var(--mono);font-size:9px;padding:7px 4px;border-radius:4px;border:1px solid var(--danger);background:transparent;color:var(--danger);cursor:pointer">BORRAR HIST</button>
+        </div>
+      </div>
+      <div id="loraStats" style="background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:10px;font-family:var(--mono);font-size:9px;color:var(--muted);display:none">
+        <div style="font-size:8px;margin-bottom:6px">DIAGNÓSTICO</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:3px 12px">
+          <div>GATEWAY: <span id="stGw" style="color:var(--accent)">—</span></div>
+          <div>ESTADO: <span id="stTxState" style="color:var(--accent)">—</span></div>
+          <div>NEXT: <span id="stNext" style="color:var(--accent)">—</span></div>
+          <div>BACKUP: <span id="stBackup" style="color:var(--accent)">—</span></div>
+          <div>TX: <span id="stTx" style="color:var(--accent)">0</span></div>
+          <div>RX: <span id="stRx" style="color:var(--accent)">0</span></div>
+          <div>FALLOS: <span id="stFallos" style="color:var(--danger)">0</span></div>
+          <div>RSSI: <span id="stRssi" style="color:var(--accent)">—</span></div>
+          <div>HIST: <span id="stHist" style="color:var(--accent)">0</span></div>
+          <div>GPS: <span id="stGps" style="color:var(--muted)">—</span></div>
+        </div>
+      </div>
     <div class="modal-btns">
       <button onclick="cerrarConfigLora()">Cancelar</button>
       <button class="ok" id="btnGuardarLora" onclick="guardarConfigLora()" style="border-color:var(--success);color:var(--success)" disabled>Guardar</button>
